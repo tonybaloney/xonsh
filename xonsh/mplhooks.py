@@ -13,7 +13,8 @@ def figure_to_rgb_array(fig, width, height):
     """
     w, h = fig.canvas.get_width_height()
     dpi = fig.get_dpi()
-    fig.set_size_inches(width/dpi, height/dpi, forward=True)
+    #fig.set_size_inches(width/dpi, height/dpi, forward=True)
+    fig.set_size_inches(width/dpi, 2*height/dpi, forward=True)
     width, height = fig.canvas.get_width_height()
     # draw the renderer
     fig.canvas.draw()
@@ -26,17 +27,32 @@ def figure_to_rgb_array(fig, width, height):
 
 def buf_to_color_str(buf):
     """Converts an RGB array to a xonsh color string."""
-    pix = '{{bg#{0:02x}{1:02x}{2:02x}}} '
+    same = ' '
+    diff = '\u2580'
+    fgpix = '{{#{0:02x}{1:02x}{2:02x}}}'
+    bgpix = '{{bg#{0:02x}{1:02x}{2:02x}}}'
     pixels = []
-    for h in range(buf.shape[0]):
-        last = None
+    #for h in range(0, buf.shape[0], 2):
+    for h in range(0, buf.shape[0], 2):
+        last0 = last1 = None
         for w in range(buf.shape[1]):
-            rgb = buf[h,w]
-            if last is not None and (last == rgb).all():
-                pixels.append(' ')
+            rgb0, rgb1 = buf[h:h+2,w]
+            if last0 is None and last1 is None:
+                pixels.append(bgpix.format(*rgb1))
+                if (rgb0 == rgb1).all():
+                    pixels.append(same)
+                else:
+                    pixels += [fgpix.format(*rgb0), diff]
+            elif (last0 == rgb0).all() and (last1 == rgb1).all():
+                pixels.append(same if (rgb0 == rgb1).all() else diff)
+            elif (last0 == rgb0).all():
+                pixels += [fgpix.format(*rgb0), diff]
+            elif (last1 == rgb1).all():
+                pixels += [bgpix.format(*rgb1), diff]
             else:
-                pixels.append(pix.format(*rgb))
-            last = rgb
+                pixels += [bgpix.format(*rgb1), fgpix.format(*rgb0), diff]
+            last0 = rgb0
+            last1 = rgb1
         pixels.append('{NO_COLOR}\n')
     pixels[-1] = pixels[-1].rstrip()
     return ''.join(pixels)
