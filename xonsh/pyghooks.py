@@ -191,7 +191,7 @@ def partial_color_tokenize(template):
     These sub-strings maybe templates themselves.
     """
     if hasattr(builtins, '__xonsh_shell__'):
-        styles = __xonsh_shell__.shell.styler.styles
+        styles = builtins.__xonsh_shell__.shell.styler.styles
     else:
         styles = None
     color = Color.NO_COLOR
@@ -552,7 +552,7 @@ if hasattr(pygments.style, 'ansicolors'):
     }
 elif ON_WINDOWS and 'CONEMUANSI' not in os.environ:
     # These colors must match the color specification
-    # in prompt_toolkit, so the colors are converted 
+    # in prompt_toolkit, so the colors are converted
     # correctly when using cmd.exe
     DEFAULT_STYLE = {
         Color.BLACK: '#000000',

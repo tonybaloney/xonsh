@@ -16,7 +16,7 @@ Original file credits:
                   'Skip Montanaro, Raymond Hettinger, Trent Nelson, '
                   'Michael Foord')
 """
-
+from __future__ import print_function
 from builtins import open as _builtin_open
 from codecs import lookup, BOM_UTF8
 import collections

@@ -27,6 +27,9 @@ except ImportError:
     from distutils.command.install_scripts import install_scripts
     HAVE_SETUPTOOLS = False
 
+from distutils.extension import Extension
+from Cython.Distutils import build_ext
+
 try:
     from jupyter_client.kernelspec import KernelSpecManager
     HAVE_JUPYTER = True
@@ -135,6 +138,8 @@ if os.name == 'nt':
 else:
     cmdclass = {'install': xinstall, 'sdist': xsdist}
 
+# cython
+cmdclass['build_ext'] = build_ext
 
 if HAVE_SETUPTOOLS:
     class xdevelop(develop):
@@ -144,6 +149,16 @@ if HAVE_SETUPTOOLS:
             build_tables()
             develop.run(self)
 
+bad_bases = {'ast', 'contexts', 'built_ins', 'codecache', 'execer', 'platform', 'xontribs'}
+
+ext_modules = []
+for name in sorted(os.listdir('xonsh')):
+    base, ext = os.path.splitext(name)
+    if ext != '.py' or base in bad_bases:
+        continue
+    ext = Extension('xonsh.'+base, ['xonsh/' + name])
+    ext_modules.append(ext)
+print(ext_modules)
 
 def main():
     """The main entry point."""
@@ -175,6 +190,7 @@ def main():
                   'xonsh.xoreutils', 'xontrib', 'xonsh.completers'],
         package_dir={'xonsh': 'xonsh', 'xontrib': 'xontrib'},
         package_data={'xonsh': ['*.json'], 'xontrib': ['*.xsh']},
+        ext_modules=ext_modules,
         cmdclass=cmdclass
         )
     if HAVE_SETUPTOOLS:

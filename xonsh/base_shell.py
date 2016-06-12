@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """The base class for xonsh shell"""
+from __future__ import print_function
 import io
 import os
 import sys

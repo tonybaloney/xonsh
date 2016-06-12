@@ -94,11 +94,11 @@ class Vox:
 
         bin_path = join(env_path, bin_dir)
 
-        if 'VIRTUAL_ENV' in __xonsh_env__:
+        if 'VIRTUAL_ENV' in builtins.__xonsh_env__:
             self.deactivate_env()
 
-        __xonsh_env__['PATH'].insert(0, bin_path)
-        __xonsh_env__['VIRTUAL_ENV'] = env_path
+        builtins.__xonsh_env__['PATH'].insert(0, bin_path)
+        builtins.__xonsh_env__['VIRTUAL_ENV'] = env_path
 
         print('Activated "%s".\n' % name)
 
@@ -106,11 +106,11 @@ class Vox:
     def deactivate_env():
         """Deactive the active virtual environment."""
 
-        if 'VIRTUAL_ENV' not in __xonsh_env__:
+        if 'VIRTUAL_ENV' not in builtins.__xonsh_env__:
             print('No environment currently active. Activate one with "vox activate".\n')
             return None
 
-        env_path = __xonsh_env__['VIRTUAL_ENV']
+        env_path = builtins.__xonsh_env__['VIRTUAL_ENV']
 
         env_name = basename(env_path)
 
@@ -126,10 +126,10 @@ class Vox:
 
         bin_path = join(env_path, bin_dir)
 
-        while bin_path in __xonsh_env__['PATH']:
-            __xonsh_env__['PATH'].remove(bin_path)
+        while bin_path in builtins.__xonsh_env__['PATH']:
+            builtins.__xonsh_env__['PATH'].remove(bin_path)
 
-        __xonsh_env__.pop('VIRTUAL_ENV')
+        builtins.__xonsh_env__.pop('VIRTUAL_ENV')
 
         print('Deactivated "%s".\n' % env_name)
 
@@ -162,7 +162,7 @@ class Vox:
             virtual environment name
         """
 
-        if 'VIRTUAL_ENV' in __xonsh_env__:
+        if 'VIRTUAL_ENV' in builtins.__xonsh_env__:
             print('This environment is currently active. If you really want to remove it, deactivate it first with "vox deactivate %s".\n' % name)
             return None
 

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Job control for the xonsh shell."""
+from __future__ import print_function
 import os
 import sys
 import time

@@ -8,6 +8,7 @@ are included from the IPython project.  The IPython project is:
     * Copyright (c) 2001, Janko Hauser <jhauser@zscout.de>
     * Copyright (c) 2001, Nathaniel Gray <n8gray@caltech.edu>
 """
+from __future__ import print_function
 import os
 import sys
 import time

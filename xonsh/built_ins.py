@@ -4,6 +4,7 @@
 Note that this module is named 'built_ins' so as not to be confused with the
 special Python builtins module.
 """
+from __future__ import print_function
 import atexit
 import builtins
 from collections import Sequence

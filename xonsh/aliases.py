@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Aliases for the xonsh shell."""
-
+from __future__ import print_function
 from argparse import ArgumentParser, Action
 import builtins
 from collections.abc import MutableMapping, Iterable, Sequence
@@ -22,7 +22,7 @@ from xonsh.tools import (XonshError, argvquote, escape_windows_cmd_string,
 from xonsh.vox import Vox
 from xonsh.xontribs import main as xontribs_main
 from xonsh.xoreutils import _which
-from xonsh.completers._aliases import completer_alias 
+from xonsh.completers._aliases import completer_alias
 
 
 class Aliases(MutableMapping):

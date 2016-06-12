@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Implements the xonsh history object."""
+from __future__ import print_function
 import argparse
 import functools
 import os
@@ -120,8 +121,8 @@ class HistoryGC(Thread):
                 if only_unlocked and lj['locked']:
                     continue
                 # info: closing timestamp, number of commands, filename
-                files.append((lj['ts'][1] or time.time(), 
-                              len(lj.sizes['cmds']) - 1, 
+                files.append((lj['ts'][1] or time.time(),
+                              len(lj.sizes['cmds']) - 1,
                               f))
                 lj.close()
             except (IOError, OSError, ValueError):
