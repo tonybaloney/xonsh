@@ -4,14 +4,17 @@ from __future__ import print_function
 import os
 import sys
 import time
+import ctypes
 import signal
 import builtins
-from subprocess import TimeoutExpired, check_output
-from collections import deque
+import functools
+import subprocess
+import collections
 
+from xonsh.lazyasd import LazyObject
 from xonsh.platform import ON_DARWIN, ON_WINDOWS, ON_CYGWIN
 
-tasks = deque()
+tasks = LazyObject(collections.deque, globals(), 'tasks')
 # Track time stamp of last exit command, so that two consecutive attempts to
 # exit can kill all jobs and exit.
 _last_exit_time = None
@@ -26,10 +29,8 @@ if ON_DARWIN:
             if pid is None:  # the pid of an aliased proc is None
                 continue
             os.kill(pid, signal)
-
 elif ON_WINDOWS:
     pass
-
 elif ON_CYGWIN:
     # Similar to what happened on OSX, more issues on Cygwin
     # (see Github issue #514).
@@ -42,10 +43,17 @@ elif ON_CYGWIN:
                     os.kill(pid, signal)
                 except:
                     pass
-
 else:
     def _send_signal(job, signal):
-        os.killpg(job['pgrp'], signal)
+        pgrp = job['pgrp']
+        if pgrp is None:
+            for pid in job['pids']:
+                try:
+                    os.kill(pid, signal)
+                except:
+                    pass
+        else:
+            os.killpg(job['pgrp'], signal)
 
 
 if ON_WINDOWS:
@@ -53,7 +61,8 @@ if ON_WINDOWS:
         job['status'] = "running"
 
     def _kill(job):
-        check_output(['taskkill', '/F', '/T', '/PID', str(job['obj'].pid)])
+        subprocess.check_output(['taskkill', '/F', '/T', '/PID',
+                                 str(job['obj'].pid)])
 
     def ignore_sigtstp():
         pass
@@ -67,25 +76,19 @@ if ON_WINDOWS:
         suspended by ctrl-z.
         """
         _clear_dead_jobs()
-
         active_task = get_next_task()
-
         # Return when there are no foreground active task
         if active_task is None:
             return
-
         obj = active_task['obj']
-
         _continue(active_task)
-
         while obj.returncode is None:
             try:
                 obj.wait(0.01)
-            except TimeoutExpired:
+            except subprocess.TimeoutExpired:
                 pass
             except KeyboardInterrupt:
                 _kill(active_task)
-
         return wait_for_active_job()
 
 else:
@@ -99,28 +102,48 @@ else:
         signal.signal(signal.SIGTSTP, signal.SIG_IGN)
 
     def _set_pgrp(info):
+        pid = info['pids'][0]
+        if pid is None:
+            # occurs if first process is an alias
+            info['pgrp'] = None
+            return
         try:
-            info['pgrp'] = os.getpgid(info['obj'].pid)
+            info['pgrp'] = os.getpgid(pid)
         except ProcessLookupError:
-            pass
+            info['pgrp'] = None
 
     _shell_pgrp = os.getpgrp()
 
-    _block_when_giving = (signal.SIGTTOU, signal.SIGTTIN,
-                          signal.SIGTSTP, signal.SIGCHLD)
+    _block_when_giving = LazyObject(lambda: (signal.SIGTTOU, signal.SIGTTIN,
+                                             signal.SIGTSTP, signal.SIGCHLD),
+                                    globals(), '_block_when_giving')
+
+    # check for shell tty
+    @functools.lru_cache(1)
+    def _shell_tty():
+        try:
+            _st = sys.stderr.fileno()
+            if os.tcgetpgrp(_st) != os.getpgid(os.getpid()):
+                # we don't own it
+                _st = None
+        except OSError:
+            _st = None
+        return _st
+
 
     # _give_terminal_to is a simplified version of:
     #    give_terminal_to from bash 4.3 source, jobs.c, line 4030
     # this will give the terminal to the process group pgid
     if ON_CYGWIN:
-        import ctypes
-        _libc = ctypes.CDLL('cygwin1.dll')
+        _libc = LazyObject(lambda: ctypes.CDLL('cygwin1.dll'),
+                           globals(), '_libc')
 
         # on cygwin, signal.pthread_sigmask does not exist in Python, even
         # though pthread_sigmask is defined in the kernel.  thus, we use
         # ctypes to mimic the calls in the "normal" version below.
         def _give_terminal_to(pgid):
-            if _shell_tty is not None and os.isatty(_shell_tty):
+            st = _shell_tty()
+            if st is not None and os.isatty(st):
                 omask = ctypes.c_ulong()
                 mask = ctypes.c_ulong()
                 _libc.sigemptyset(ctypes.byref(mask))
@@ -130,25 +153,18 @@ else:
                 _libc.sigprocmask(ctypes.c_int(signal.SIG_BLOCK),
                                   ctypes.byref(mask),
                                   ctypes.byref(omask))
-                _libc.tcsetpgrp(ctypes.c_int(_shell_tty), ctypes.c_int(pgid))
+                _libc.tcsetpgrp(ctypes.c_int(st), ctypes.c_int(pgid))
                 _libc.sigprocmask(ctypes.c_int(signal.SIG_SETMASK),
                                   ctypes.byref(omask), None)
     else:
         def _give_terminal_to(pgid):
-            if _shell_tty is not None and os.isatty(_shell_tty):
+            st = _shell_tty()
+            if st is not None and os.isatty(st):
                 oldmask = signal.pthread_sigmask(signal.SIG_BLOCK,
                                                  _block_when_giving)
-                os.tcsetpgrp(_shell_tty, pgid)
+                os.tcsetpgrp(st, pgid)
                 signal.pthread_sigmask(signal.SIG_SETMASK, oldmask)
 
-    # check for shell tty
-    try:
-        _shell_tty = sys.stderr.fileno()
-        if os.tcgetpgrp(_shell_tty) != os.getpgid(os.getpid()):
-            # we don't own it
-            _shell_tty = None
-    except OSError:
-        _shell_tty = None
 
     def wait_for_active_job():
         """
@@ -156,21 +172,17 @@ else:
         suspended by ctrl-z.
         """
         _clear_dead_jobs()
-
         active_task = get_next_task()
-
         # Return when there are no foreground active task
         if active_task is None:
             _give_terminal_to(_shell_pgrp)  # give terminal back to the shell
             return
-
-        pgrp = active_task['pgrp']
+        pgrp = active_task.get('pgrp', None)
         obj = active_task['obj']
         # give the terminal over to the fg process
-        _give_terminal_to(pgrp)
-
+        if pgrp is not None:
+            _give_terminal_to(pgrp)
         _continue(active_task)
-
         _, wcode = os.waitpid(obj.pid, os.WUNTRACED)
         if os.WIFSTOPPED(wcode):
             print()  # get a newline because ^Z will have been printed
@@ -182,7 +194,6 @@ else:
         else:
             obj.returncode = os.WEXITSTATUS(wcode)
             obj.signal = None
-
         return wait_for_active_job()
 
 

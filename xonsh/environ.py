@@ -8,7 +8,6 @@ import json
 import locale
 import builtins
 from contextlib import contextmanager
-from functools import wraps
 from itertools import chain
 from pprint import pformat
 import re
@@ -17,28 +16,34 @@ import string
 import subprocess
 import shutil
 from warnings import warn
-from collections import (Mapping, MutableMapping, MutableSequence, MutableSet,
-    namedtuple)
+from collections import (
+    Mapping, MutableMapping, MutableSequence, MutableSet,
+    namedtuple
+)
 
 from xonsh import __version__ as XONSH_VERSION
 from xonsh.jobs import get_next_task
 from xonsh.codecache import run_script_with_cache
 from xonsh.dirstack import _get_cwd
-from xonsh.foreign_shells import DEFAULT_SHELLS, load_foreign_envs
-from xonsh.platform import (BASH_COMPLETIONS_DEFAULT, ON_ANACONDA, ON_LINUX,
-                            ON_WINDOWS, DEFAULT_ENCODING, ON_CYGWIN)
+from xonsh.foreign_shells import load_foreign_envs
+from xonsh.platform import (
+    BASH_COMPLETIONS_DEFAULT, DEFAULT_ENCODING, PATH_DEFAULT,
+    ON_WINDOWS, ON_ANACONDA, ON_LINUX, ON_CYGWIN,
+)
 from xonsh.tools import (
-    IS_SUPERUSER, always_true, always_false, ensure_string, is_env_path,
+    is_superuser, always_true, always_false, ensure_string, is_env_path,
     str_to_env_path, env_path_to_str, is_bool, to_bool, bool_to_str,
     is_history_tuple, to_history_tuple, history_tuple_to_str, is_float,
-    is_string, is_callable, is_string_or_callable,
+    is_string, is_string_or_callable,
     is_completions_display_value, to_completions_display_value,
     is_string_set, csv_to_set, set_to_csv, get_sep, is_int, is_bool_seq,
-    is_bool_or_int, to_bool_or_int, bool_or_int_to_str,
+    to_bool_or_int, bool_or_int_to_str,
     csv_to_bool_seq, bool_seq_to_csv, DefaultNotGiven, print_exception,
     setup_win_unicode_console, intensify_colors_on_win_setter, format_color,
     is_dynamic_cwd_width, to_dynamic_cwd_tuple, dynamic_cwd_tuple_to_str,
-    is_logfile_opt, to_logfile_opt, logfile_opt_to_str, executables_in
+    is_logfile_opt, to_logfile_opt, logfile_opt_to_str, executables_in,
+    is_nonstring_seq_of_strings, pathsep_to_upper_seq,
+    seq_to_upper_pathsep,
 )
 
 
@@ -71,7 +76,8 @@ def to_debug(x):
     execer's debug level.
     """
     val = to_bool_or_int(x)
-    builtins.__xonsh_execer__.debug_level = val
+    if hasattr(builtins, '__xonsh_execer__'):
+        builtins.__xonsh_execer__.debug_level = val
     return val
 
 Ensurer = namedtuple('Ensurer', ['validate', 'convert', 'detype'])
@@ -95,6 +101,7 @@ DEFAULT_ENSURERS = {
                           dynamic_cwd_tuple_to_str),
     'FORCE_POSIX_PATHS': (is_bool, to_bool, bool_to_str),
     'FUZZY_PATH_COMPLETION': (is_bool, to_bool, bool_to_str),
+    'GLOB_SORTED': (is_bool, to_bool, bool_to_str),
     'HISTCONTROL': (is_string_set, csv_to_set, set_to_csv),
     'IGNOREEOF': (is_bool, to_bool, bool_to_str),
     'INTENSIFY_COLORS_ON_WIN':(always_false, intensify_colors_on_win_setter,
@@ -110,7 +117,8 @@ DEFAULT_ENSURERS = {
     'MOUSE_SUPPORT': (is_bool, to_bool, bool_to_str),
     'MULTILINE_PROMPT': (is_string_or_callable, ensure_string, ensure_string),
     re.compile('\w*PATH$'): (is_env_path, str_to_env_path, env_path_to_str),
-    'PATHEXT': (is_env_path, str_to_env_path, env_path_to_str),
+    'PATHEXT': (is_nonstring_seq_of_strings, pathsep_to_upper_seq,
+                seq_to_upper_pathsep),
     'PRETTY_PRINT_RESULTS': (is_bool, to_bool, bool_to_str),
     'PROMPT': (is_string_or_callable, ensure_string, ensure_string),
     'RAISE_SUBPROC_ERROR': (is_bool, to_bool, bool_to_str),
@@ -216,6 +224,7 @@ DEFAULT_VALUES = {
     'EXPAND_ENV_VARS': True,
     'FORCE_POSIX_PATHS': False,
     'FUZZY_PATH_COMPLETION': True,
+    'GLOB_SORTED': True,
     'HISTCONTROL': set(),
     'IGNOREEOF': False,
     'INDENT': '    ',
@@ -229,8 +238,8 @@ DEFAULT_VALUES = {
     'LOADED_RC_FILES': (),
     'MOUSE_SUPPORT': False,
     'MULTILINE_PROMPT': '.',
-    'PATH': (),
-    'PATHEXT': (),
+    'PATH': PATH_DEFAULT,
+    'PATHEXT': ['.COM', '.EXE', '.BAT', '.CMD'] if ON_WINDOWS else [],
     'PRETTY_PRINT_RESULTS': True,
     'PROMPT': DEFAULT_PROMPT,
     'PUSHD_MINUS': False,
@@ -373,6 +382,9 @@ DEFAULT_DOCS = {
         "used as a fallback if no other completions succeed but can be used "
         "as a way to adjust for typographical errors. If ``True``, then, e.g.,"
         " ``xonhs`` will match ``xonsh``."),
+    'GLOB_SORTED': VarDocs(
+        "Toggles whether globbing results are manually sorted. If ``False``, "
+        "the results are returned in arbitrary order."),
     'HISTCONTROL': VarDocs(
         'A set of strings (comma-separated list in string form) of options '
         'that determine what commands are saved to the history list. By '
@@ -408,7 +420,9 @@ DEFAULT_DOCS = {
         configurable=False),
     'PATH': VarDocs(
         'List of strings representing where to look for executables.'),
-    'PATHEXT': VarDocs('List of strings for filtering valid executables by.'),
+    'PATHEXT': VarDocs('Sequence of extention strings (eg, ".EXE") for '
+                       'filtering valid executables by. Each element must be '
+                       'uppercase.'),
     'PRETTY_PRINT_RESULTS': VarDocs(
             'Flag for "pretty printing" return values.'),
     'PROMPT': VarDocs(
@@ -534,7 +548,8 @@ DEFAULT_DOCS = {
     'XONSH_DEBUG': VarDocs(
         'Sets the xonsh debugging level. This may be an integer or a boolean, '
         'with higher values cooresponding to higher debuging levels and more '
-        'information presented.', configurable=False),
+        'information presented. Setting this variable prior to stating xonsh '
+        'will supress amalgamated imports.', configurable=False),
     'XONSH_DATA_DIR': VarDocs(
         'This is the location where xonsh data files are stored, such as '
         'history.', default="'$XDG_DATA_HOME/xonsh'"),
@@ -611,13 +626,17 @@ class Env(MutableMapping):
         """If no initial environment is given, os.environ is used."""
         self._d = {}
         self._orig_env = None
-        self.ensurers = {k: Ensurer(*v) for k, v in DEFAULT_ENSURERS.items()}
-        self.defaults = DEFAULT_VALUES
-        self.docs = DEFAULT_DOCS
+        self._ensurers = {k: Ensurer(*v) for k, v in DEFAULT_ENSURERS.items()}
+        self._defaults = DEFAULT_VALUES
+        self._docs = DEFAULT_DOCS
         if len(args) == 0 and len(kwargs) == 0:
             args = (os.environ, )
         for key, val in dict(*args, **kwargs).items():
             self[key] = val
+        if 'PATH' not in self._d:
+            # this is here so the PATH is accessible to subprocs and so that
+            # it can be modified in-place in the xonshrc file
+            self._d['PATH'] = list(PATH_DEFAULT)
         self._detyped = None
 
     @staticmethod
@@ -660,27 +679,27 @@ class Env(MutableMapping):
     def get_ensurer(self, key,
                     default=Ensurer(always_true, None, ensure_string)):
         """Gets an ensurer for the given key."""
-        if key in self.ensurers:
-            return self.ensurers[key]
-        for k, ensurer in self.ensurers.items():
+        if key in self._ensurers:
+            return self._ensurers[key]
+        for k, ensurer in self._ensurers.items():
             if isinstance(k, str):
                 continue
             if k.match(key) is not None:
                 break
         else:
             ensurer = default
-        self.ensurers[key] = ensurer
+        self._ensurers[key] = ensurer
         return ensurer
 
     def get_docs(self, key, default=VarDocs('<no documentation>')):
         """Gets the documentation for the environment variable."""
-        vd = self.docs.get(key, None)
+        vd = self._docs.get(key, None)
         if vd is None:
             return default
         if vd.default is DefaultNotGiven:
-            dval = pformat(self.defaults.get(key, '<default not set>'))
+            dval = pformat(self._defaults.get(key, '<default not set>'))
             vd = vd._replace(default=dval)
-            self.docs[key] = vd
+            self._docs[key] = vd
         return vd
 
     def is_manually_set(self, varname):
@@ -696,20 +715,17 @@ class Env(MutableMapping):
         manager, the original values are restored.
         """
         old = {}
-
         # single positional argument should be a dict-like object
         if other is not None:
             for k, v in other.items():
                 old[k] = self.get(k, NotImplemented)
                 self[k] = v
-
         # kwargs could also have been sent in
         for k, v in kwargs.items():
             old[k] = self.get(k, NotImplemented)
             self[k] = v
 
         yield self
-
         # restore the values
         for k, v in old.items():
             if v is NotImplemented:
@@ -735,8 +751,8 @@ class Env(MutableMapping):
             val = self._d['ARGS'][ix]
         elif key in self._d:
             val = self._d[key]
-        elif key in self.defaults:
-            val = self.defaults[key]
+        elif key in self._defaults:
+            val = self._defaults[key]
             if is_callable_default(val):
                 val = val(self)
         else:
@@ -776,7 +792,7 @@ class Env(MutableMapping):
             return default
 
     def __iter__(self):
-        yield from (set(self._d) | set(self.defaults))
+        yield from (set(self._d) | set(self._defaults))
 
     def __len__(self):
         return len(self._d)
@@ -785,7 +801,7 @@ class Env(MutableMapping):
         return str(self._d)
 
     def __repr__(self):
-        return '{0}.{1}({2})'.format(self.__class__.__module__,
+        return '{0}.{1}(...)'.format(self.__class__.__module__,
                                      self.__class__.__name__, self._d)
 
     def _repr_pretty_(self, p, cycle):
@@ -814,18 +830,8 @@ def _yield_executables(directory, name):
 
 
 def locate_binary(name):
-    if os.path.isfile(name) and name != os.path.basename(name):
-        return name
-    directories = builtins.__xonsh_env__.get('PATH')
-    # Windows users expect to be able to execute files in the same directory
-    # without `./`
-    if ON_WINDOWS:
-        directories = [_get_cwd()] + directories
-    try:
-        return next(chain.from_iterable(_yield_executables(directory, name) for
-                    directory in directories if os.path.isdir(directory)))
-    except StopIteration:
-        return None
+    """Locates an executable on the file system."""
+    return builtins.__xonsh_commands_cache__.locate_binary(name)
 
 
 def get_git_branch():
@@ -935,14 +941,14 @@ def _first_branch_timeout_message():
 def current_branch(pad=True):
     """Gets the branch for a current working directory. Returns an empty string
     if the cwd is not a repository.  This currently only works for git and hg
-    and should be extended in the future.  If a timeout occured, the string
+    and should be extended in the future.  If a timeout occurred, the string
     '<branch-timeout>' is returned.
     """
     branch = ''
     cmds = builtins.__xonsh_commands_cache__
-    if cmds.lazyin('git') or cmds.lazylen() == 0:
+    if cmds.lazy_locate_binary('git') or cmds.is_empty():
         branch = get_git_branch()
-    if (cmds.lazyin('hg') or cmds.lazylen() == 0) and not branch:
+    if (cmds.lazy_locate_binary('hg') or cmds.is_empty()) and not branch:
         branch = get_hg_branch()
     if isinstance(branch, subprocess.TimeoutExpired):
         branch = '<branch-timeout>'
@@ -1006,16 +1012,16 @@ def dirty_working_directory(cwd=None):
     """
     dwd = None
     cmds = builtins.__xonsh_commands_cache__
-    if cmds.lazyin('git') or cmds.lazylen() == 0:
+    if cmds.lazy_locate_binary('git') or cmds.is_empty():
         dwd = git_dirty_working_directory()
-    if (cmds.lazyin('hg') or cmds.lazylen() == 0) and (dwd is None):
+    if (cmds.lazy_locate_binary('hg') or cmds.is_empty()) and (dwd is None):
         dwd = hg_dirty_working_directory()
     return dwd
 
 
 def branch_color():
     """Return red if the current branch is dirty, yellow if the dirtiness can
-    not be determined, and green if it clean. Thes are bold, intesnse colors
+    not be determined, and green if it clean. These are bold, intense colors
     for the foreground.
     """
     dwd = dirty_working_directory()
@@ -1138,7 +1144,7 @@ else:
 
 FORMATTER_DICT = dict(
     user=os.environ.get(USER, '<user>'),
-    prompt_end='#' if IS_SUPERUSER else '$',
+    prompt_end='#' if is_superuser() else '$',
     hostname=socket.gethostname().split('.', 1)[0],
     cwd=_dynamically_collapsed_pwd,
     cwd_dir=lambda: os.path.dirname(_replace_home_cwd()),
@@ -1410,7 +1416,7 @@ def windows_foreign_env_fixes(ctx):
             ctx[ev] = os.environ[ev]
         elif ev in ctx:
             del ctx[ev]
-    ctx['PWD'] = _get_cwd()
+    ctx['PWD'] = _get_cwd() or ''
 
 
 def foreign_env_fixes(ctx):
@@ -1418,12 +1424,12 @@ def foreign_env_fixes(ctx):
     if 'PROMPT' in ctx:
         del ctx['PROMPT']
 
-
 def default_env(env=None, config=None, login=True):
     """Constructs a default xonsh environment."""
     # in order of increasing precedence
     ctx = dict(BASE_ENV)
     ctx.update(os.environ)
+    ctx['PWD'] = _get_cwd() or ''
     # other shells' PROMPT definitions generally don't work in XONSH:
     try:
         del ctx['PROMPT']
@@ -1433,7 +1439,7 @@ def default_env(env=None, config=None, login=True):
     if login:
         conf = load_static_config(ctx, config=config)
 
-        foreign_env = load_foreign_envs(shells=conf.get('foreign_shells', DEFAULT_SHELLS),
+        foreign_env = load_foreign_envs(shells=conf.get('foreign_shells', ()),
                                         issue_warning=False)
         if ON_WINDOWS:
             windows_foreign_env_fixes(foreign_env)

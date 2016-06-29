@@ -136,19 +136,25 @@ variable in Python.  The same is true for deleting them too.
 
 Very nice.
 
-__xonsh_env__
---------------
+The Environment Itself ``${...}``
+---------------------------------
 
-All environment variables live in the built-in ``__xonsh_env__`` mapping. You can access this
-mapping directly, but in most situations, you shouldn't need to.
+All environment variables live in the built-in ``${...}`` (aka ``__xonsh_env__``) mapping.
+You can access this mapping directly, but in most situations, you shouldn’t need to.
 
-One helpful method on the __xonsh_env__ is :func:`~xonsh.environ.Env.swap`.  It can be used to temporarily set an
-environment variable:
+If you want for example to check if an environment variable is present in your current
+session (say, in your awesome new ``xonsh`` script) you can use the membership operator:
+.. code-block:: xonshcon
 
+   >>> 'HOME' in ${...}
+   True
+
+One helpful method on the ``${...}`` is :func:`~xonsh.environ.Env.swap`.
+It can be used to temporarily set an environment variable:
 
 .. code-block:: xonshcon
 
-    >>> with __xonsh_env__.swap(SOMEVAR='foo'):
+    >>> with ${...}.swap(SOMEVAR='foo'):
     ...     echo $SOMEVAR
     ...
     ...
@@ -156,6 +162,31 @@ environment variable:
     >>> echo $SOMEVAR
 
     >>>
+
+Environment Lookup with ``${<expr>}``
+-------------------------------------
+
+The ``$NAME`` is great as long as you know the name of the environment
+variable you want to look up.  But what if you want to construct the name
+programmatically, or read it from another variable?  Enter the ``${}``
+operator.
+
+.. warning:: In Bash, ``$NAME`` and ``${NAME}`` are syntactically equivalent.
+             In xonsh, they have separate meanings.
+
+We can place any valid Python expression inside of the curly braces in
+``${<expr>}``. This result of this expression will then be used to look up a
+value in the environment. Here are a couple of examples in action:
+
+.. code-block:: xonshcon
+
+    >>> x = 'USER'
+    >>> ${x}
+    'snail'
+    >>> ${'HO' + 'ME'}
+    '/home/snail'
+
+Not bad, xonsh, not bad.
 
 Environment Types
 -----------------
@@ -192,41 +223,6 @@ They can be seen on the `Environment Variables page <envvars.html>`_.
           will produce an empty string.  In Python mode, however, a
           ``KeyError`` will be raised if the variable does not exist in the
           environment.
-
-Environment Lookup with ``${}``
-================================
-The ``$NAME`` is great as long as you know the name of the environment
-variable you want to look up.  But what if you want to construct the name
-programmatically, or read it from another variable?  Enter the ``${}``
-operator.
-
-.. warning:: In Bash, ``$NAME`` and ``${NAME}`` are syntactically equivalent.
-             In xonsh, they have separate meanings.
-
-We can place any valid Python expression inside of the curly braces in
-``${<expr>}``. This result of this expression will then be used to look up a
-value in the environment.  In fact, ``${<expr>}`` is the same as doing
-``__xonsh_env__[<expr>]``, but much nicer to look at. Here are a couple of
-examples in action:
-
-.. code-block:: xonshcon
-
-    >>> x = 'USER'
-    >>> ${x}
-    'snail'
-    >>> ${'HO' + 'ME'}
-    '/home/snail'
-
-Not bad, xonsh, not bad.
-
-If you want to check if an environment variable is present in your current
-session (say, in your awesome new ``xonsh`` script) you can pass an Ellipsis to
-the ``${}`` operator:
-
-.. code-block:: xonshcon
-
-   >>> 'HOME' in ${...}
-   True
 
 Running Commands
 ==============================
@@ -843,8 +839,15 @@ This is not available in Python-mode because multiplication is pretty
 important.
 
 
-Regular Expression Filename Globbing with Backticks
-=====================================================
+Advanced Path Search with Backticks
+===================================
+
+xonsh offers additional ways to find path names beyond regular globbing, both
+in Python mode and in subprocess mode.
+
+Regular Expression Globbing
+---------------------------
+
 If you have ever felt that normal globbing could use some more octane,
 then regex globbing is the tool for you! Any string that uses backticks
 (`````) instead of quotes (``'``, ``"``) is interpreted as a regular
@@ -866,13 +869,58 @@ Let's see a demonstration with some simple filenames:
     >>> len(`a(a+|b+)a`)
     3
 
+This same kind of search is performed if the backticks are prefaced with ``r``.
+So the following expresions are equivalent: ```test``` and ``r`test```.
+
 Other than the regex matching, this functions in the same way as normal
-globbing.
-For more information, please see the documentation for the ``re`` module in
-the Python standard library.
+globbing.  For more information, please see the documentation for the ``re``
+module in the Python standard library.
 
 .. warning:: This backtick syntax has very different from that of Bash.  In
              Bash, backticks mean to run a captured subprocess ``$()``.
+
+
+Normal Globbing
+---------------
+
+In subprocess mode, normal globbing happens without any special syntax.
+However, the backtick syntax has an additional feature: it is available inside
+of Python mode as well as subprocess mode.
+
+Similarly to regex globbing, normal globbing can be performed (either in Python
+mode or subprocess mode) by using the ``g````:
+
+.. code-block:: xonshcon
+
+    >>> touch a aa aaa aba abba aab aabb abcba
+    >>> ls a*b*
+    aab  aabb  aba  abba  abcba
+    >>> ls g`a*b*`
+    aab  aabb  aba  abba  abcba
+    >>> print(g`a*b*`)
+    ['aab', 'aabb', 'abba', 'abcba', 'aba']
+    >>> len(g`a*b*`)
+    5
+
+
+Custom Path Searches
+--------------------
+
+In addition, if normal globbing and regular expression globbing are not enough,
+xonsh allows you to specify your own search functions.
+
+A search function is defined as a function of a single argument (a string) that
+returns a list of possible matches to that string.  Search functions can then
+be used with backticks with the following syntax: ``@<name>`test```
+
+The following example shows the form of these functions:
+
+.. code-block:: xonshcon
+
+    >>> def foo(s):
+    ...     return [i for i in os.listdir('.') if i.startswith(s)]
+    >>> @foo`aa`
+    ['aa', 'aaa', 'aab', 'aabb']
 
 
 Help & Superhelp with ``?`` & ``??``

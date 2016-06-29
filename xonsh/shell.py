@@ -1,15 +1,16 @@
 # -*- coding: utf-8 -*-
 """The xonsh shell"""
-import builtins
+import os
 import random
+import builtins
 from warnings import warn
 
-from xonsh import xontribs
+from xonsh.xontribs import update_context
 from xonsh.environ import xonshrc_context
 from xonsh.execer import Execer
-from xonsh.platform import (best_shell_type, has_prompt_toolkit, ptk_version,
-                            ptk_version_info)
-from xonsh.tools import XonshError
+from xonsh.platform import (best_shell_type, has_prompt_toolkit,
+                            ptk_version_is_supported, ptk_version_info)
+from xonsh.tools import XonshError, to_bool_or_int
 
 
 class Shell(object):
@@ -55,15 +56,15 @@ class Shell(object):
             if not has_prompt_toolkit():
                 warn('prompt_toolkit is not available, using readline instead.')
                 shell_type = 'readline'
+            elif not ptk_version_is_supported():
+                warn('prompt-toolkit version < v1.0.0 is not supported. '
+                     'Please update prompt-toolkit. Using readline instead.')
+                shell_type = 'readline'
         env['SHELL_TYPE'] = shell_type
         # actually make the shell
         if shell_type == 'none':
             from xonsh.base_shell import BaseShell as shell_class
         elif shell_type == 'prompt_toolkit':
-            if ptk_version_info()[:2] < (1, 0):
-                msg = ('prompt-toolkit version < v1.0.0 is not supported, '
-                       'xonsh may not work as expected. Please update.')
-                warn(msg, RuntimeWarning)
             from xonsh.ptk.shell import PromptToolkitShell as shell_class
         elif shell_type == 'readline':
             from xonsh.readline_shell import ReadlineShell as shell_class
@@ -81,14 +82,16 @@ class Shell(object):
 
     def _init_environ(self, ctx, config, rc, scriptcache, cacheall):
         self.ctx = {} if ctx is None else ctx
-        self.execer = Execer(config=config, login=self.login, xonsh_ctx=self.ctx)
+        debug = to_bool_or_int(os.getenv('XONSH_DEBUG', '0'))
+        self.execer = Execer(config=config, login=self.login, xonsh_ctx=self.ctx,
+                             debug_level=debug)
         self.execer.scriptcache = scriptcache
         self.execer.cacheall = cacheall
         if self.stype != 'none' or self.login:
             # load xontribs from config file
             names = builtins.__xonsh_config__.get('xontribs', ())
             for name in names:
-                xontribs.update_context(name, ctx=self.ctx)
+                update_context(name, ctx=self.ctx)
             # load run control files
             env = builtins.__xonsh_env__
             rc = env.get('XONSHRC') if rc is None else rc

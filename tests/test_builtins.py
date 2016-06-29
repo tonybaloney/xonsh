@@ -4,13 +4,12 @@ from __future__ import unicode_literals, print_function
 import os
 import re
 
-import nose
-from nose.plugins.skip import SkipTest
-from nose.tools import assert_equal, assert_true, assert_not_in
+import pytest
 
 from xonsh import built_ins
-from xonsh.built_ins import reglob, regexpath, helper, superhelper, \
-    ensure_list_of_strs, list_of_strs_or_callables
+from xonsh.built_ins import reglob, pathsearch, helper, superhelper, \
+    ensure_list_of_strs, list_of_strs_or_callables, regexsearch, \
+    globsearch
 from xonsh.environ import Env
 from xonsh.tools import ON_WINDOWS
 
@@ -20,60 +19,55 @@ from tools import mock_xonsh_env
 def test_reglob_tests():
     testfiles = reglob('test_.*')
     for f in testfiles:
-        assert_true(f.startswith('test_'))
+        assert (f.startswith('test_'))
 
+@pytest.mark.skipif(ON_WINDOWS, reason='Unix stuff')
 def test_repath_backslash():
-    if ON_WINDOWS:
-        raise SkipTest
     home = os.path.expanduser('~')
     built_ins.ENV = Env(HOME=home)
     with mock_xonsh_env(built_ins.ENV):
         exp = os.listdir(home)
         exp = {p for p in exp if re.match(r'\w\w.*', p)}
         exp = {os.path.join(home, p) for p in exp}
-        obs = set(regexpath(r'~/\w\w.*'))
-        assert_equal(exp, obs)
+        obs = set(pathsearch(regexsearch, r'~/\w\w.*'))
+        assert exp ==  obs
 
+@pytest.mark.skipif(ON_WINDOWS, reason='Unix stuff')
 def test_repath_home_itself():
-    if ON_WINDOWS:
-        raise SkipTest
     exp = os.path.expanduser('~')
     built_ins.ENV = Env(HOME=exp)
     with mock_xonsh_env(built_ins.ENV):
-        obs = regexpath('~')
-        assert_equal(1, len(obs))
-        assert_equal(exp, obs[0])
+        obs = pathsearch(regexsearch, '~')
+        assert 1 ==  len(obs)
+        assert exp ==  obs[0]
 
+@pytest.mark.skipif(ON_WINDOWS, reason='Unix stuff')
 def test_repath_home_contents():
-    if ON_WINDOWS:
-        raise SkipTest
     home = os.path.expanduser('~')
     built_ins.ENV = Env(HOME=home)
     with mock_xonsh_env(built_ins.ENV):
         exp = os.listdir(home)
         exp = {os.path.join(home, p) for p in exp}
-        obs = set(regexpath('~/.*'))
-        assert_equal(exp, obs)
+        obs = set(pathsearch(regexsearch, '~/.*'))
+        assert exp ==  obs
 
+@pytest.mark.skipif(ON_WINDOWS, reason='Unix stuff')
 def test_repath_home_var():
-    if ON_WINDOWS:
-        raise SkipTest
     exp = os.path.expanduser('~')
     built_ins.ENV = Env(HOME=exp)
     with mock_xonsh_env(built_ins.ENV):
-        obs = regexpath('$HOME')
-        assert_equal(1, len(obs))
-        assert_equal(exp, obs[0])
+        obs = pathsearch(regexsearch, '$HOME')
+        assert 1 ==  len(obs)
+        assert exp ==  obs[0]
 
+@pytest.mark.skipif(ON_WINDOWS, reason='Unix stuff')
 def test_repath_home_var_brace():
-    if ON_WINDOWS:
-        raise SkipTest
     exp = os.path.expanduser('~')
     built_ins.ENV = Env(HOME=exp)
     with mock_xonsh_env(built_ins.ENV):
-        obs = regexpath('${"HOME"}')
-        assert_equal(1, len(obs))
-        assert_equal(exp, obs[0])
+        obs = pathsearch(regexsearch, '${"HOME"}')
+        assert 1 ==  len(obs)
+        assert exp ==  obs[0]
 
 def test_helper_int():
     with mock_xonsh_env({}):
@@ -103,7 +97,7 @@ def test_ensure_list_of_strs():
     cases = [(['yo'], 'yo'), (['yo'], ['yo']), (['42'], 42), (['42'], [42])]
     for exp, inp in cases:
         obs = ensure_list_of_strs(inp)
-        yield assert_equal, exp, obs
+        assert exp == obs
 
 def test_list_of_strs_or_callables():
     f = lambda x: 20
@@ -111,7 +105,4 @@ def test_list_of_strs_or_callables():
              ([f], f), ([f], [f])]
     for exp, inp in cases:
         obs = list_of_strs_or_callables(inp)
-        yield assert_equal, exp, obs
-
-if __name__ == '__main__':
-    nose.runmodule()
+        assert exp == obs

@@ -80,28 +80,36 @@ def _startswithnorm(x, start, startlow=None):
     return x.startswith(start)
 
 
-def _add_env(paths, prefix):
+def _env(prefix):
     if prefix.startswith('$'):
         key = prefix[1:]
-        paths.update({'$' + k
-                      for k in builtins.__xonsh_env__
-                      if get_filter_function()(k, key)})
+        return {'$' + k
+                for k in builtins.__xonsh_env__
+                if get_filter_function()(k, key)}
+    return ()
 
 
-def _add_dots(paths, prefix):
+def _dots(prefix):
+    slash = get_sep()
+    if slash == '\\':
+        slash = ''
     if prefix in {'', '.'}:
-        paths.update({'./', '../'})
-    if prefix == '..':
-        paths.add('../')
+        return ('.'+slash, '..'+slash)
+    elif prefix == '..':
+        return ('..'+slash,)
+    else:
+        return ()
 
 
 def _add_cdpaths(paths, prefix):
     """Completes current prefix using CDPATH"""
     env = builtins.__xonsh_env__
     csc = env.get('CASE_SENSITIVE_COMPLETIONS')
+    glob_sorted = env.get('GLOB_SORTED')
     for cdp in env.get('CDPATH'):
         test_glob = os.path.join(cdp, prefix) + '*'
-        for s in iglobpath(test_glob, ignore_case=(not csc)):
+        for s in iglobpath(test_glob, ignore_case=(not csc),
+                           sort_result=glob_sorted):
             if os.path.isdir(s):
                 paths.add(os.path.basename(s))
 
@@ -216,16 +224,17 @@ def _subsequence_match_iter(ref, typed):
 
 def _expand_one(sofar, nextone, csc):
     out = set()
+    glob_sorted = builtins.__xonsh_env__.get('GLOB_SORTED')
     for i in sofar:
         _glob = os.path.join(_joinpath(i), '*') if i is not None else '*'
-        for j in iglobpath(_glob):
+        for j in iglobpath(_glob, sort_result=glob_sorted):
             j = os.path.basename(j)
             if subsequence_match(j, nextone, csc):
                 out.add((i or ()) + (j, ))
     return out
 
 
-def complete_path(prefix, line, start, end, ctx, cdpath=True):
+def complete_path(prefix, line, start, end, ctx, cdpath=True, filtfunc=None):
     """Completes based on a path name."""
     # string stuff for automatic quoting
     path_str_start = ''
@@ -241,9 +250,11 @@ def complete_path(prefix, line, start, end, ctx, cdpath=True):
     paths = set()
     env = builtins.__xonsh_env__
     csc = env.get('CASE_SENSITIVE_COMPLETIONS')
-    for s in iglobpath(prefix + '*', ignore_case=(not csc)):
+    glob_sorted = env.get('GLOB_SORTED')
+    for s in iglobpath(prefix + '*', ignore_case=(not csc),
+                       sort_result=glob_sorted):
         paths.add(s)
-    if env.get('SUBSEQUENCE_PATH_COMPLETION'):
+    if len(paths) == 0 and env.get('SUBSEQUENCE_PATH_COMPLETION'):
         # this block implements 'subsequence' matching, similar to fish and zsh.
         # matches are based on subsequences, not substrings.
         # e.g., ~/u/ro completes to ~/lou/carcolh
@@ -261,7 +272,8 @@ def complete_path(prefix, line, start, end, ctx, cdpath=True):
             paths |= {_joinpath(i) for i in matches_so_far}
     if len(paths) == 0 and env.get('FUZZY_PATH_COMPLETION'):
         threshold = env.get('SUGGEST_THRESHOLD')
-        for s in iglobpath(os.path.dirname(prefix) + '*', ignore_case=(not csc)):
+        for s in iglobpath(os.path.dirname(prefix) + '*', ignore_case=(not csc),
+                           sort_result=glob_sorted):
             if levenshtein(prefix, s, threshold) < threshold:
                 paths.add(s)
     if tilde in prefix:
@@ -269,14 +281,15 @@ def complete_path(prefix, line, start, end, ctx, cdpath=True):
         paths = {s.replace(home, tilde) for s in paths}
     if cdpath:
         _add_cdpaths(paths, prefix)
+    paths = set(filter(filtfunc, paths))
     paths = _quote_paths({_normpath(s) for s in paths},
                          path_str_start,
                          path_str_end)
-    _add_env(paths, prefix)
-    _add_dots(paths, prefix)
+    paths.update(filter(filtfunc, _dots(prefix)))
+    paths.update(filter(filtfunc, _env(prefix)))
     return paths, lprefix
 
 
 def complete_dir(prefix, line, start, end, ctx, cdpath=False):
-    o, lp = complete_path(prefix, line, start, end, cdpath)
-    return {i for i in o if os.path.isdir(i)}, lp
+    return complete_path(prefix, line, start, end, cdpath,
+                         filtfunc=os.path.isdir)

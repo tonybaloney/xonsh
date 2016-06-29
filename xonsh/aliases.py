@@ -12,15 +12,15 @@ from xonsh.dirstack import cd, pushd, popd, dirs, _get_cwd
 from xonsh.environ import locate_binary
 from xonsh.foreign_shells import foreign_shell_data
 from xonsh.jobs import jobs, fg, bg, clean_jobs
-from xonsh.history import main as history_alias
+from xonsh.history import history_main
 from xonsh.platform import ON_ANACONDA, ON_DARWIN, ON_WINDOWS, scandir
 from xonsh.proc import foreground
-from xonsh.replay import main as replay_main
+from xonsh.replay import replay_main
 from xonsh.timings import timeit_alias
 from xonsh.tools import (XonshError, argvquote, escape_windows_cmd_string,
                          to_bool)
 from xonsh.vox import Vox
-from xonsh.xontribs import main as xontribs_main
+from xonsh.xontribs import xontribs_main
 from xonsh.xoreutils import _which
 from xonsh.completers._aliases import completer_alias
 
@@ -142,12 +142,11 @@ class Aliases(MutableMapping):
 
 
 
-def exit(args, stdin=None):  # pylint:disable=redefined-builtin,W0622
+def xonsh_exit(args, stdin=None):
     """Sends signal to exit shell."""
     if not clean_jobs():
         # Do not exit if jobs not cleaned up
         return None, None
-
     builtins.__xonsh_exit__ = True
     print()  # gimme a newline
     return None, None
@@ -282,7 +281,8 @@ def source_cmd(args, stdin=None):
     args.append('--envcmd=set')
     args.append('--seterrpostcmd=if errorlevel 1 exit 1')
     args.append('--use-tmpfile=1')
-    return source_foreign(args, stdin=stdin)
+    with builtins.__xonsh_env__.swap(PROMPT='$P$G'):
+        return source_foreign(args, stdin=stdin)
 
 
 def xexec(args, stdin=None):
@@ -339,7 +339,7 @@ class AWitchAWitch(Action):
 
     def __call__(self, parser, namespace, values, option_string=None):
         import webbrowser
-        webbrowser.open('https://github.com/scopatz/xonsh/commit/f49b400')
+        webbrowser.open('https://github.com/xonsh/xonsh/commit/f49b400')
         parser.exit()
 
 
@@ -393,7 +393,7 @@ def which(args, stdin=None, stdout=None, stderr=None):
         if pargs.exts:
             exts = pargs.exts
         else:
-            exts = builtins.__xonsh_env__.get('PATHEXT', ['.COM', '.EXE', '.BAT'])
+            exts = builtins.__xonsh_env__['PATHEXT']
     else:
         exts = None
 
@@ -449,15 +449,18 @@ def which(args, stdin=None, stdout=None, stderr=None):
 
 def xonfig(args, stdin=None):
     """Runs the xonsh configuration utility."""
-    from xonsh.xonfig import main  # lazy import
-    return main(args)
+    from xonsh.xonfig import xonfig_main  # lazy import
+    return xonfig_main(args)
 
 
 @foreground
 def trace(args, stdin=None):
     """Runs the xonsh tracer utility."""
-    from xonsh.tracer import main  # lazy import
-    return main(args)
+    from xonsh.tracer import tracermain  # lazy import
+    try:
+        return tracermain(args)
+    except SystemExit:
+        pass
 
 
 def vox(args, stdin=None):
@@ -496,16 +499,16 @@ def make_default_aliases():
         'jobs': jobs,
         'fg': fg,
         'bg': bg,
-        'EOF': exit,
-        'exit': exit,
-        'quit': exit,
+        'EOF': xonsh_exit,
+        'exit': xonsh_exit,
+        'quit': xonsh_exit,
         'xexec': xexec,
         'source': source_alias,
         'source-zsh': ['source-foreign', 'zsh', '--sourcer=source'],
         'source-bash':  ['source-foreign', 'bash', '--sourcer=source'],
         'source-cmd': source_cmd,
         'source-foreign': source_foreign,
-        'history': history_alias,
+        'history': history_main,
         'replay': replay_main,
         '!!': bang_bang,
         '!n': bang_n,
@@ -545,17 +548,10 @@ def make_default_aliases():
         default_aliases['call'] = ['source-cmd']
         default_aliases['source-bat'] = ['source-cmd']
         default_aliases['clear'] = 'cls'
-        # Add aliases specific to the Anaconda python distribution.
         if ON_ANACONDA:
-            def source_cmd_keep_prompt(args, stdin=None):
-                p = builtins.__xonsh_env__.get('PROMPT')
-                source_cmd(args, stdin=stdin)
-                builtins.__xonsh_env__['PROMPT'] = p
-            default_aliases['source-cmd-keep-promt'] = source_cmd_keep_prompt
-            default_aliases['activate'] = ['source-cmd-keep-promt',
-                                           'activate.bat']
-            default_aliases['deactivate'] = ['source-cmd-keep-promt',
-                                             'deactivate.bat']
+            # Add aliases specific to the Anaconda python distribution.
+            default_aliases['activate'] = ['source-cmd', 'activate.bat']
+            default_aliases['deactivate'] = ['source-cmd', 'deactivate.bat']
         if not locate_binary('sudo'):
             import xonsh.winutils as winutils
 
@@ -579,5 +575,7 @@ def make_default_aliases():
         default_aliases['ls'] = ['ls', '-G']
     else:
         default_aliases['grep'] = ['grep', '--color=auto']
+        default_aliases['egrep'] = ['egrep', '--color=auto']
+        default_aliases['fgrep'] = ['fgrep', '--color=auto']
         default_aliases['ls'] = ['ls', '--color=auto', '-v']
     return default_aliases

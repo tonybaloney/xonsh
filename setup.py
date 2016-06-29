@@ -2,11 +2,12 @@
 # -*- coding: ascii -*-
 """The xonsh installer."""
 # Note: Do not embed any non-ASCII characters in this file until pip has been
-# fixed. See https://github.com/scopatz/xonsh/issues/487.
+# fixed. See https://github.com/xonsh/xonsh/issues/487.
 from __future__ import print_function, unicode_literals
 import os
 import sys
 import json
+import subprocess
 
 try:
     from tempfile import TemporaryDirectory
@@ -36,9 +37,8 @@ try:
 except ImportError:
     HAVE_JUPYTER = False
 
-from xonsh import __version__ as XONSH_VERSION
 
-TABLES = ['xonsh/lexer_table.py', 'xonsh/parser_table.py']
+TABLES = ['xonsh/lexer_table.py', 'xonsh/parser_table.py', 'xonsh/__amalgam__.py']
 
 
 def clean_tables():
@@ -46,7 +46,20 @@ def clean_tables():
     for f in TABLES:
         if os.path.isfile(f):
             os.remove(f)
-            print('Remove ' + f)
+            print('Removed ' + f)
+
+
+os.environ['XONSH_DEBUG'] = '1'
+from xonsh import __version__ as XONSH_VERSION
+
+def amalagamate_source():
+    """Amalgamtes source files."""
+    try:
+        import amalgamate
+    except ImportError:
+        print('Could not import amalgamate, skipping.', file=sys.stderr)
+        return
+    amalgamate.main(['amalgamate', '--debug=XONSH_DEBUG', 'xonsh'])
 
 
 def build_tables():
@@ -56,6 +69,7 @@ def build_tables():
     from xonsh.parser import Parser
     Parser(lexer_table='lexer_table', yacc_table='parser_table',
            outputdir='xonsh')
+    amalagamate_source()
     sys.path.pop(0)
 
 
@@ -91,11 +105,61 @@ def install_jupyter_hook(prefix=None, root=None):
             d, 'xonsh', user=user, replace=True, prefix=prefix)
 
 
+def dirty_version():
+    """
+    If install/sdist is run from a git directory (not a conda install), add
+    a devN suffix to reported version number and write a gitignored file
+    that holds the git hash of the current state of the repo to be queried
+    by ``xonfig``
+    """
+    try:
+        _version = subprocess.check_output(['git', 'describe', '--tags'])
+        _version = _version.decode('ascii')
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+
+    try:
+        base, N, sha = _version.strip().split('-')
+    except ValueError: #on base release
+        open('xonsh/dev.githash', 'w').close()
+        return False
+
+    replace_version(base, N)
+    with open('xonsh/dev.githash', 'w') as f:
+        f.write(sha)
+
+    return True
+
+
+def replace_version(base, N):
+    """Replace version in `__init__.py` with devN suffix"""
+    with open('xonsh/__init__.py', 'r') as f:
+        raw = f.read()
+    lines = raw.splitlines()
+    lines[0] = "__version__ = '{}.dev{}'".format(base, N)
+    upd = '\n'.join(lines) + '\n'
+    with open('xonsh/__init__.py', 'w') as f:
+        f.write(upd)
+
+
+def discard_changes():
+    """If we touch ``__init__.py``, discard changes after install"""
+    try:
+        _ = subprocess.check_output(['git',
+                                     'checkout',
+                                     '--',
+                                     'xonsh/__init__.py'])
+    except subprocess.CalledProcessError:
+        pass
+
+
 class xinstall(install):
     """Xonsh specialization of setuptools install class."""
     def run(self):
         clean_tables()
         build_tables()
+        # add dirty version number
+        dirty = dirty_version()
         # install Jupyter hook
         root = self.root if self.root else None
         prefix = self.prefix if self.prefix else None
@@ -106,6 +170,9 @@ class xinstall(install):
             traceback.print_exc()
             print('Installing Jupyter hook failed.')
         install.run(self)
+        if dirty:
+            discard_changes()
+
 
 
 class xsdist(sdist):
@@ -113,7 +180,10 @@ class xsdist(sdist):
     def make_release_tree(self, basedir, files):
         clean_tables()
         build_tables()
+        dirty = dirty_version()
         sdist.make_release_tree(self, basedir, files)
+        if dirty:
+            discard_changes()
 
 
 #-----------------------------------------------------------------------------
@@ -147,7 +217,10 @@ if HAVE_SETUPTOOLS:
         def run(self):
             clean_tables()
             build_tables()
+            dirty = dirty_version()
             develop.run(self)
+            if dirty:
+                discard_changes()
 
 bad_bases = {'ast', 'contexts', 'built_ins', 'codecache', 'execer', 'platform', 'xontribs'}
 
@@ -174,6 +247,11 @@ def main():
         pass
     with open(os.path.join(os.path.dirname(__file__), 'README.rst'), 'r') as f:
         readme = f.read()
+    scripts = ['scripts/xon.sh']
+    if sys.platform == 'win32':
+        scripts.append('scripts/xonsh.bat')
+    else:
+        scripts.append('scripts/xonsh')
     skw = dict(
         name='xonsh',
         description='A general purpose, Python-ish shell',
@@ -183,26 +261,33 @@ def main():
         author='Anthony Scopatz',
         maintainer='Anthony Scopatz',
         author_email='scopatz@gmail.com',
-        url='https://github.com/scopatz/xonsh',
+        url='https://github.com/xonsh/xonsh',
         platforms='Cross Platform',
         classifiers=['Programming Language :: Python :: 3'],
         packages=['xonsh', 'xonsh.ply', 'xonsh.ptk', 'xonsh.parsers',
                   'xonsh.xoreutils', 'xontrib', 'xonsh.completers'],
         package_dir={'xonsh': 'xonsh', 'xontrib': 'xontrib'},
-        package_data={'xonsh': ['*.json'], 'xontrib': ['*.xsh']},
         ext_modules=ext_modules,
-        cmdclass=cmdclass
+        package_data={'xonsh': ['*.json', '*.githash'], 'xontrib': ['*.xsh']},
+        cmdclass=cmdclass,
+        scripts=scripts,
         )
     if HAVE_SETUPTOOLS:
+        # WARNING!!! Do not use setuptools 'console_scripts'
+        # It validates the depenendcies (of which we have none) everytime the
+        # 'xonsh' command is run. This validation adds ~0.2 sec. to the startup
+        # time of xonsh - for every single xonsh run.  This prevents us from
+        # reaching the goal of a startup time of < 0.1 sec.  So never ever write
+        # the following:
+        #
+        #     'console_scripts': ['xonsh = xonsh.main:main'],
+        #
+        # END WARNING
         skw['entry_points'] = {
             'pygments.lexers': ['xonsh = xonsh.pyghooks:XonshLexer',
                                 'xonshcon = xonsh.pyghooks:XonshConsoleLexer'],
-            'console_scripts': ['xonsh = xonsh.main:main'],
             }
         skw['cmdclass']['develop'] = xdevelop
-    else:
-        skw['scripts'] = ['scripts/xonsh'] if 'win' not in sys.platform else ['scripts/xonsh.bat']
-
     setup(**skw)
 
 
