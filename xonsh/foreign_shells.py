@@ -2,6 +2,7 @@
 """Tools to help interface with foreign shells, such as Bash."""
 import os
 import re
+import sys
 import json
 import shlex
 import tempfile
@@ -219,6 +220,7 @@ def foreign_shell_data(shell, interactive=True, login=False, envcmd=None,
     envcmd = DEFAULT_ENVCMDS.get(shkey, 'env') if envcmd is None else envcmd
     aliascmd = DEFAULT_ALIASCMDS.get(shkey, 'alias') if aliascmd is None else aliascmd
     funcscmd = DEFAULT_FUNCSCMDS.get(shkey, 'echo {}') if funcscmd is None else funcscmd
+    sourcer = DEFAULT_SOURCERS.get(shkey, 'source') if sourcer is None else sourcer
     tmpfile_ext = DEFAULT_TMPFILE_EXT.get(shkey, 'sh') if tmpfile_ext is None else tmpfile_ext
     runcmd = DEFAULT_RUNCMD.get(shkey, '-c') if runcmd is None else runcmd
     seterrprevcmd = DEFAULT_SETERRPREVCMD.get(shkey, '') \
@@ -248,6 +250,10 @@ def foreign_shell_data(shell, interactive=True, login=False, envcmd=None,
                                     start_new_session=(not ON_CYGWIN),
                                     universal_newlines=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
+        msg = 'Failed to source foreign shell with command:'
+        msg += msg + '\n' + '-'*len(msg) + '\n'
+        msg += ' '.join(cmd[:-1]) + '\n' + cmd[-1] + '\n'
+        print(msg, file=sys.stderr)
         if not safe:
             raise
         return None, None
