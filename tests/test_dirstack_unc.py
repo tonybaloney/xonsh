@@ -2,40 +2,54 @@
 """Testing dirstack"""
 #from __future__ import unicode_literals, print_function
 
+import os
+import string
+import builtins
+import subprocess
 from contextlib import contextmanager
 from functools import wraps
-import os
-import os.path
-import subprocess
 
-import builtins
 import pytest
+
 from xonsh import dirstack
 from xonsh.environ import Env
 from xonsh.built_ins import load_builtins
-from xonsh.dirstack import DIRSTACK
+from xonsh.dirstack import DIRSTACK, _drive_letter_free
 from xonsh.platform import ON_WINDOWS
 from xonsh.dirstack import _unc_tempDrives
 
-HERE = os.path.abspath(os.path.dirname(__file__))
-PARENT = os.path.dirname(HERE)
 
+@pytest.yield_fixture(scope="module")
+def setup_dirs(tmpdir_factory):
+    parent = tmpdir_factory.mktemp('parent')
+    here = parent.mkdir('subfolder')
+    yield parent.strpath, here.strpath
 
-def drive_in_use(letter):
-    return ON_WINDOWS and os.system('vol {}: 2>nul>nul'.format(letter)) == 0
+@pytest.yield_fixture(scope="module")
+def PARENT(setup_dirs):
+    yield setup_dirs[0]
+
+@pytest.yield_fixture(scope="module")
+def HERE(setup_dirs):
+    yield setup_dirs[1]
 
 MAX_TEMP_DRIVES = 4
 TEMP_DRIVE = []
+for l in 'zyxwvutsrqp':
+    l = l+':'
+    if len(TEMP_DRIVE) < MAX_TEMP_DRIVES and _drive_letter_free(l):
+        TEMP_DRIVE.append(l)
+    
 
-for d in 'zyxwvuts':
-    if not drive_in_use(d):
-        TEMP_DRIVE.append(d + ':')
-pytestmark = pytest.mark.skipif(len(TEMP_DRIVE) < MAX_TEMP_DRIVES,
-                                reason='Too many drive letters are already used by Windows to run the tests.')
+pytestmark = [
+    pytest.mark.skipif(ON_WINDOWS and len(TEMP_DRIVE) < MAX_TEMP_DRIVES,
+                       reason='Too many drive letters are already used by Windows to run the tests.'),
+    pytest.mark.skipif(not ON_WINDOWS, reason="Windows-only UNC functionality")
+]
 
 
 @pytest.yield_fixture(scope="module")
-def shares_setup(tmpdir_factory):
+def shares_setup(HERE, PARENT):
     """create some shares to play with on current machine.
 
     Yield (to test case) array of structs: [uncPath, driveLetter, equivLocalPath]
@@ -67,11 +81,10 @@ def shares_setup(tmpdir_factory):
         # unless I wait > 10 sec. see http://stackoverflow.com/questions/38448413/access-denied-in-net-share-delete
 
 
-def test_pushdpopd(xonsh_builtins):
+def test_pushdpopd(xonsh_builtins, HERE, PARENT):
     """Simple non-UNC push/pop to verify we didn't break nonUNC case.
     """
     xonsh_builtins.__xonsh_env__ = Env(CDPATH=PARENT, PWD=HERE)
-
     dirstack.cd([PARENT])
     owd = os.getcwd()
     assert owd.casefold() == xonsh_builtins.__xonsh_env__['PWD'].casefold()
@@ -90,8 +103,7 @@ def test_cd_dot(xonsh_builtins):
     assert owd == os.getcwd().casefold()
 
 
-@pytest.mark.skipif( not ON_WINDOWS, reason="Windows-only UNC functionality")
-def test_uncpushd_simple_push_pop(xonsh_builtins, shares_setup):
+def test_uncpushd_simple_push_pop(xonsh_builtins, shares_setup, HERE, PARENT):
     xonsh_builtins.__xonsh_env__ = Env(CDPATH=PARENT, PWD=HERE)
 
     dirstack.cd([PARENT])
@@ -106,8 +118,7 @@ def test_uncpushd_simple_push_pop(xonsh_builtins, shares_setup):
     assert len(_unc_tempDrives) == 0
 
 
-@pytest.mark.skipif( not ON_WINDOWS, reason="Windows-only UNC functionality")
-def test_uncpushd_push_to_same_share(xonsh_builtins):
+def test_uncpushd_push_to_same_share(xonsh_builtins, HERE, PARENT):
     xonsh_builtins.__xonsh_env__ = Env(CDPATH=PARENT, PWD=HERE)
 
     dirstack.cd([PARENT])
@@ -134,8 +145,7 @@ def test_uncpushd_push_to_same_share(xonsh_builtins):
     assert len(_unc_tempDrives) == 0
 
 
-@pytest.mark.skipif( not ON_WINDOWS, reason="Windows-only UNC functionality")
-def test_uncpushd_push_other_push_same(xonsh_builtins):
+def test_uncpushd_push_other_push_same(xonsh_builtins, HERE, PARENT):
     """push to a, then to b. verify drive letter is TEMP_DRIVE[2], skipping already used TEMP_DRIVE[1]
        Then push to a again. Pop (check b unmapped and a still mapped), pop, pop (check a is unmapped)"""
     xonsh_builtins.__xonsh_env__ = Env(CDPATH=PARENT, PWD=HERE)
@@ -181,7 +191,6 @@ def test_uncpushd_push_other_push_same(xonsh_builtins):
     assert not os.path.isdir(TEMP_DRIVE[0] + '\\')
 
 
-@pytest.mark.skipif( not ON_WINDOWS, reason="Windows-only UNC functionality")
 def test_uncpushd_push_base_push_rempath(xonsh_builtins):
     """push to subdir under share, verify  mapped path includes subdir"""
     pass
@@ -243,7 +252,6 @@ def xonsh_builtins_cd(xonsh_builtins):
     return xonsh_builtins
 
 
-@pytest.mark.skipif(not ON_WINDOWS, reason="Windows-only UNC functionality")
 def test_uncpushd_cd_unc_auto_pushd(xonsh_builtins_cd, with_unc_check_enabled):
     xonsh_builtins_cd.__xonsh_env__['AUTO_PUSHD'] = True
     so, se, rc = dirstack.cd([r'\\localhost\uncpushd_test_PARENT'])
@@ -253,13 +261,11 @@ def test_uncpushd_cd_unc_auto_pushd(xonsh_builtins_cd, with_unc_check_enabled):
     assert os.path.isdir(TEMP_DRIVE[0] + '\\')
 
 
-@pytest.mark.skipif(not ON_WINDOWS, reason="Windows-only UNC functionality")
 def test_uncpushd_cd_unc_nocheck(xonsh_builtins_cd, with_unc_check_disabled):
     dirstack.cd([r'\\localhost\uncpushd_test_HERE'])
     assert os.getcwd().casefold() == r'\\localhost\uncpushd_test_here'
 
 
-@pytest.mark.skipif(not ON_WINDOWS, reason="Windows-only UNC functionality")
 def test_uncpushd_cd_unc_no_auto_pushd(xonsh_builtins_cd, with_unc_check_enabled):
     so, se, rc = dirstack.cd([r'\\localhost\uncpushd_test_PARENT'])
     assert rc != 0
@@ -267,7 +273,6 @@ def test_uncpushd_cd_unc_no_auto_pushd(xonsh_builtins_cd, with_unc_check_enabled
     assert 'disableunccheck' in se.casefold() and 'auto_pushd' in se.casefold()
 
 
-@pytest.mark.skipif(not ON_WINDOWS, reason="Windows-only UNC functionality")
 def test_uncpushd_unc_check():
     # emminently suited to mocking, but I don't know how
     # need to verify unc_check_enabled correct whether values set in HKCU or HKLM
