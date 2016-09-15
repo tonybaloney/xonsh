@@ -56,6 +56,24 @@ def _is_unc_path(some_path)->bool:
     return len(some_path) > 1 and some_path[0] == some_path[1] and some_path[0] in (os.sep, os.altsep)
 
 
+def _drive_letter_free(letter)->bool:
+    """Checks if a drive letter is used, either as a physical drive or remembered as
+       a network share"""
+    if os.path.isdir(letter):
+        return False
+    import winreg
+    reg_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r'Network')
+    i = 1
+    while True:
+        try:
+            if letter.strip(':') == winreg.EnumKey(reg_key, i):
+                return False
+            i+=1
+        except WindowsError:
+            break
+    return True
+
+
 def _unc_map_temp_drive(unc_path)->str:
 
     """Map a new temporary drive letter for each distinct share,
@@ -86,7 +104,7 @@ def _unc_map_temp_drive(unc_path)->str:
 
         for dord in range(ord('z'), ord('a'), -1):
             d = chr(dord) + ':'
-            if not os.path.isdir(d):  # find unused drive letter starting from z:
+            if _drive_letter_free(d):  # find unused drive letter starting from z:
                 subprocess.check_output(['NET', 'USE', d, unc_share], universal_newlines=True)
                 _unc_tempDrives[d] = unc_share
                 return os.path.join(d, rem_path)
