@@ -17,9 +17,12 @@ from tools import DummyShell, sp
 def xonsh_execer(monkeypatch):
     """Initiate the Execer with a mocked nop `load_builtins`"""
     monkeypatch.setattr(xonsh.built_ins, 'load_builtins', lambda *args, **kwargs: None)
+    monkeypatch.setattr(xonsh.built_ins, 'unload_builtins', lambda *args, **kwargs: None)
     execer = Execer(login=False, unload=False)
     builtins.__xonsh_execer__ = execer
-    return execer
+    yield execer
+    if hasattr(builtins, '__xonsh_execer__'):
+        del builtins.__xonsh_execer__
 
 
 @pytest.yield_fixture
