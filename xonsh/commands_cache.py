@@ -263,6 +263,7 @@ def default_threadable_predictors():
         'man': predict_help_ver,
         'more': predict_help_ver,
         'mutt': predict_help_ver,
+        'pacman': predict_help_ver,
         'scp': predict_false,
         'sh': predict_shell,
         'ssh': predict_false,
